@@ -9,6 +9,7 @@ use rand_chacha::ChaCha20Rng;
 use serde_json;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use std::str;
 
 pub fn generate_salt() -> String {
     let mut rng = ChaCha20Rng::from_entropy();
@@ -110,7 +111,7 @@ pub fn create_sd_jwt(
     );
     let svc_payload = Value::Object(svc_payload_map);
 
-    let svc_payload_jwt = internal_hash(&svc_payload);
+    let svc_payload_serialized = internal_hash(&svc_payload);
 
     let mut header = JwsHeader::new();
     header.set_token_type("JWT");
@@ -141,8 +142,53 @@ pub fn create_sd_jwt(
         Value::Object(payload.claims_set().clone()),
         jwt,
         svc_payload,
-        svc_payload_jwt,
+        svc_payload_serialized,
     );
+}
+
+pub fn create_sd_jwt_release(
+    nonce: String,
+    aud: String,
+    disclosed_claims: Value,
+    svc_payload_serialized: String,
+    holder: &Vec<u8>,
+) -> (Value, std::string::String) {
+    let keypair = RsaKeyPair::from_pem(holder).unwrap();
+    let public_key = keypair.to_jwk_public_key();
+    let signer = RS256.signer_from_pem(holder).unwrap();
+
+    let decoded_vec = base64_url::decode(&svc_payload_serialized).unwrap();
+    let decoded = str::from_utf8(&decoded_vec).unwrap();
+    let svc_claims_outer: Value = serde_json::from_str(&decoded).unwrap();
+    let svc_raw_values = svc_claims_outer.as_object().unwrap().get("_sd").unwrap();
+
+    let get_raw_lambda = |_: Value, _: Value, raw: Value| raw;
+
+    let mut header = JwsHeader::new();
+    header.set_token_type("JWT");
+
+    let jwk_value: serde_json::Map<String, Value> = public_key.into();
+    let mut payload = JwtPayload::new();
+    // Set nonce & aud
+    payload
+        .set_claim("nonce", Some(Value::String(nonce)))
+        .unwrap();
+    payload.set_claim("aud", Some(Value::String(aud))).unwrap();
+
+    // Set the public key
+    payload
+        .set_claim("sub_jwk", Some(Value::Object(jwk_value)))
+        .unwrap();
+
+    let svc_disclosed_claims =
+        walk_by_structure(svc_raw_values.clone(), disclosed_claims, &get_raw_lambda);
+    // Now add the svc_disclised_claims
+    payload
+        .set_claim("_sd", Some(svc_disclosed_claims))
+        .unwrap();
+
+    let sd_jwt_release = jwt::encode_with_signer(&payload, &header, &signer).unwrap();
+    return (Value::Object(payload.claims_set().clone()), sd_jwt_release);
 }
 
 #[cfg(test)]
