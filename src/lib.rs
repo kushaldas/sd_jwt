@@ -1,8 +1,14 @@
 use base64_url;
+use josekit::{
+    jwk::alg::rsa::RsaKeyPair,
+    jws::{JwsHeader, RS256},
+    jwt::{self, JwtPayload},
+};
 use rand::prelude::*;
 use rand_chacha::ChaCha20Rng;
 use serde_json;
-use serde_json::{json, Error, Value};
+use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 pub fn generate_salt() -> String {
     let mut rng = ChaCha20Rng::from_entropy();
@@ -56,6 +62,87 @@ where
     }
 
     Value::Object(out)
+}
+
+pub fn hash_claim(salt: Value, value: Value, raw: bool) -> std::string::String {
+    let raw_value = Value::Array(vec![salt, value]);
+    let raw_string = raw_value.to_string();
+    if raw == true {
+        return raw_string;
+    };
+    let mut hasher = Sha256::new();
+    hasher.update(raw_string.as_bytes());
+    let result = hasher.finalize();
+
+    base64_url::encode(&result)
+}
+
+fn internal_hash(raw_value: &Value) -> std::string::String {
+    let encoded = serde_json::ser::to_string_pretty(raw_value).unwrap();
+    base64_url::encode(&encoded)
+}
+
+pub fn create_sd_jwt(
+    issuer: &Vec<u8>,
+    issuer_url: &str,
+    user_claims: Value,
+) -> (Value, String, Value, String) {
+    let keypair = RsaKeyPair::from_pem(issuer).unwrap();
+    let public_key = keypair.to_jwk_public_key();
+    let signer = RS256.signer_from_pem(issuer).unwrap();
+
+    let gen_salts_lambda = |_: Value, _: Value, _: Value| Value::String(generate_salt());
+    let sd_claims_lambda = |_: Value, v, salt| Value::String(hash_claim(salt, v, false));
+    let sd_svc_lambda = |_: Value, v, salt| Value::String(hash_claim(salt, v, true));
+
+    // Let us get the salts
+    let salts = walk_by_structure(
+        Value::Object(serde_json::Map::new()),
+        user_claims.clone(),
+        &gen_salts_lambda,
+    );
+
+    let sd_claims = walk_by_structure(salts.clone(), user_claims.clone(), &sd_claims_lambda);
+    let mut svc_payload_map = serde_json::Map::new();
+    svc_payload_map.insert(
+        "_sd".into(),
+        walk_by_structure(salts, user_claims, &sd_svc_lambda),
+    );
+    let svc_payload = Value::Object(svc_payload_map);
+
+    let svc_payload_jwt = internal_hash(&svc_payload);
+
+    let mut header = JwsHeader::new();
+    header.set_token_type("JWT");
+
+    let jwk_value: serde_json::Map<String, Value> = public_key.into();
+    let mut payload = JwtPayload::new();
+    // TODO: sub value must be updated later
+    payload.set_subject("subject");
+    payload.set_issuer(issuer_url);
+
+    // For now fixed iat and exp
+    let iat_as_number: serde_json::Value = 1516239022.into();
+    payload.set_claim("iat", Some(iat_as_number)).unwrap();
+    let exp_as_number: serde_json::Value = 1516247022.into();
+    payload.set_claim("exp", Some(exp_as_number)).unwrap();
+
+    // Set the public key
+    payload
+        .set_claim("sub_jwk", Some(Value::Object(jwk_value)))
+        .unwrap();
+
+    // Now add the salted values
+    payload.set_claim("_sd", Some(sd_claims)).unwrap();
+
+    let jwt = jwt::encode_with_signer(&payload, &header, &signer).unwrap();
+
+    return (
+        Value::Object(payload.claims_set().clone()),
+        jwt,
+        svc_payload,
+        svc_payload_jwt,
+    );
 }
 
 #[cfg(test)]
