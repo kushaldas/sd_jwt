@@ -167,7 +167,7 @@ pub fn create_sd_jwt_release(
     let mut header = JwsHeader::new();
     header.set_token_type("JWT");
 
-    let jwk_value: serde_json::Map<String, Value> = public_key.into();
+    let _jwk_value: serde_json::Map<String, Value> = public_key.into();
     let mut payload = JwtPayload::new();
     // Set nonce & aud
     payload
@@ -175,10 +175,10 @@ pub fn create_sd_jwt_release(
         .unwrap();
     payload.set_claim("aud", Some(Value::String(aud))).unwrap();
 
-    // Set the public key
-    payload
-        .set_claim("sub_jwk", Some(Value::Object(jwk_value)))
-        .unwrap();
+    // We don't need the public key in SD-JWT-RELEASE for now
+    // payload
+    //     .set_claim("sub_jwk", Some(Value::Object(jwk_value)))
+    //     .unwrap();
 
     let svc_disclosed_claims =
         walk_by_structure(svc_raw_values.clone(), disclosed_claims, &get_raw_lambda);
