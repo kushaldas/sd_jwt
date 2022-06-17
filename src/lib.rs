@@ -10,6 +10,7 @@ use serde_json;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::str;
+use std::time::SystemTime;
 
 pub fn generate_salt() -> String {
     let mut rng = ChaCha20Rng::from_entropy();
@@ -87,6 +88,7 @@ pub fn create_sd_jwt(
     issuer: &Vec<u8>,
     issuer_url: &str,
     user_claims: Value,
+    exp: Option<u64>,
 ) -> (Value, String, Value, String) {
     let keypair = RsaKeyPair::from_pem(issuer).unwrap();
     let public_key = keypair.to_jwk_public_key();
@@ -123,10 +125,13 @@ pub fn create_sd_jwt(
     payload.set_issuer(issuer_url);
 
     // For now fixed iat and exp
-    let iat_as_number: serde_json::Value = 1516239022.into();
-    payload.set_claim("iat", Some(iat_as_number)).unwrap();
-    let exp_as_number: serde_json::Value = 1516247022.into();
-    payload.set_claim("exp", Some(exp_as_number)).unwrap();
+    let now = SystemTime::now();
+    payload.set_issued_at(&now);
+
+    if let Some(exp_value) = exp {
+        let exp_as_number: serde_json::Value = exp_value.into();
+        payload.set_claim("exp", Some(exp_as_number)).unwrap();
+    };
 
     // Set the public key
     payload

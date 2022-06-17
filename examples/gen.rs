@@ -36,7 +36,7 @@ fn main() {
     let issuer = std::fs::read("./issuer.pem").unwrap();
 
     let (payload, jwt, svc_payload, svc_serialized) =
-        create_sd_jwt(&issuer, &issuer_url, user_claims);
+        create_sd_jwt(&issuer, &issuer_url, user_claims, Some(1516247022));
 
     println!(
         "The SD-JWT is:\n {}",
@@ -65,4 +65,9 @@ fn main() {
     );
 
     println!("The serialized SD-JWT-RELEASE is: \n {}", sd_jwt_release);
+
+    println!(
+        "\n\nThe combined presentation: \n\n{}\n\n",
+        format!("{}.{}", jwt, sd_jwt_release)
+    );
 }
