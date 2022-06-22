@@ -59,9 +59,9 @@ pub fn generate_salt() -> String {
     base64_url::encode(&data)
 }
 
-pub fn get_public_key(key_material: &Vec<u8>) -> Jwk {
-    let keypair = RsaKeyPair::from_pem(key_material).unwrap();
-    keypair.to_jwk_public_key()
+pub fn get_public_key(key_material: &Vec<u8>) -> Result<Jwk> {
+    let keypair = RsaKeyPair::from_pem(key_material)?;
+    Ok(keypair.to_jwk_public_key())
 }
 
 pub fn walk_by_structure<T>(structure: Value, obj: Value, func: &T) -> Result<Value>
@@ -203,7 +203,7 @@ pub fn create_sd_jwt(
 
     // Set the holder binding key
     if let Some(holder_key_pem) = holder {
-        let holder_public_key = get_public_key(holder_key_pem);
+        let holder_public_key = get_public_key(holder_key_pem)?;
         let jwk_value: serde_json::Map<String, Value> = holder_public_key.into();
         payload
             .set_claim("sub_jwk", Some(Value::Object(jwk_value)))
@@ -349,7 +349,7 @@ fn verify_sd_jwt_release(
 
     let (payload, _header) = match hpk {
         Some(value) => {
-            let holder_key = get_public_key(value);
+            let holder_key = get_public_key(value)?;
             if let Some(key_from_payload) = hpk_payload {
                 // Now match if this matches with the key from payload
                 if holder_key != key_from_payload {
