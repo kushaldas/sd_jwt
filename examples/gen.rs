@@ -83,7 +83,7 @@ fn main() {
         combined_presentation
     );
 
-    verify(
+    let verified_values = verify(
         &combined_presentation,
         &issuer,
         issuer_url,
@@ -92,4 +92,5 @@ fn main() {
         Some(&noanced),
     )
     .unwrap();
+    dbg!(verified_values);
 }

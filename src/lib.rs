@@ -1,4 +1,5 @@
 use base64_url;
+use constant_time_eq::constant_time_eq;
 use josekit::{
     jwk::alg::rsa::RsaKeyPair,
     jwk::{self, Jwk},
@@ -37,6 +38,12 @@ pub enum SDError {
     NonceError,
     #[error("No selective disclosure claims in SD-JWT-Release")]
     SDJwtReleaseError,
+    #[error("Claims are not matching. {0} != {1}")]
+    DigestError(String, String),
+    #[error("Released claimed value is not a list.")]
+    ReleasedClaimListError,
+    #[error("Released claimed value does not have 2 entries.")]
+    ReleasedClaimLengthError,
 }
 
 impl std::convert::From<JoseError> for SDError {
@@ -112,11 +119,36 @@ pub fn hash_claim(salt: Value, value: Value, raw: bool) -> std::string::String {
     if raw == true {
         return raw_string;
     };
+    hash_raw(&raw_string)
+}
+
+// Takes a raw string, hash it and returns the
+// base64url value as string.
+fn hash_raw(raw_string: &str) -> std::string::String {
     let mut hasher = Sha256::new();
     hasher.update(raw_string.as_bytes());
     let result = hasher.finalize();
 
     base64_url::encode(&result)
+}
+
+fn check_claim(_name: Value, released: Value, claimed_value: Value) -> Result<Value> {
+    let hashed_value = hash_raw(released.as_str().unwrap());
+    let claimed_hash = claimed_value.as_str().unwrap();
+    if !constant_time_eq(&hashed_value.as_bytes(), &claimed_hash.as_bytes()) {
+        return Err(SDError::DigestError(hashed_value, claimed_hash.to_string()));
+    }
+    let released_values: Value = match released.as_str() {
+        Some(val) => serde_json::from_str(val).unwrap(),
+        None => return Err(SDError::ReleasedClaimListError),
+    };
+
+    let released_values = released_values.as_array().unwrap();
+    if released_values.len() != 2 {
+        return Err(SDError::ReleasedClaimLengthError);
+    }
+
+    Ok(released_values[1].clone())
 }
 
 fn internal_hash(raw_value: &Value) -> std::string::String {
@@ -245,7 +277,7 @@ pub fn verify(
     holder_public_key: Option<&Vec<u8>>,
     aud: Option<&str>,
     nonce: Option<&str>,
-) -> Result<bool> {
+) -> Result<Value> {
     // If we are verifying the holder binding, then aud & nonce is must.
 
     if holder_public_key.is_some() {
@@ -302,11 +334,11 @@ pub fn verify(
         nonce,
     )?;
 
-    dbg!(sd_jwt_claims);
-    dbg!(sd_jwt_release_claims);
-
-    Ok(true)
+    walk_by_structure(sd_jwt_claims, sd_jwt_release_claims, &check_claim)
 }
+
+// fn check_claims(name: Value, released: Value, claim_value: Value) -> Result<Value> {
+// }
 
 fn verify_sd_jwt_release(
     jwt: &str,

@@ -14,6 +14,7 @@ rand_chacha = "0.3.1"
 base64-url = "1.4.13"
 sha2 = "0.10.2"
 thiserror = "1"
+constant_time_eq = "0.2"
 
 [lib]
 doctest = false

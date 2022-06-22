@@ -72,6 +72,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
+name = "constant_time_eq"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0e31aa570361918e61453e3b5377976b23e4599e8bb5b840380ecd3a20e691d2"
+
+[[package]]
 name = "cpufeatures"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -358,6 +364,7 @@ name = "sd-jwt"
 version = "0.1.0"
 dependencies = [
  "base64-url",
+ "constant_time_eq",
  "josekit",
  "rand",
  "rand_chacha",
