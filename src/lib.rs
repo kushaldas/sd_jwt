@@ -1,8 +1,10 @@
 use base64_url;
 use josekit::{
     jwk::alg::rsa::RsaKeyPair,
-    jws::{JwsHeader, RS256},
+    jwk::{self, Jwk},
+    jws::{JwsHeader, JwsVerifier, RS256},
     jwt::{self, JwtPayload},
+    JoseError,
 };
 use rand::prelude::*;
 use rand_chacha::ChaCha20Rng;
@@ -11,6 +13,25 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::str;
 use std::time::SystemTime;
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum SDError {
+    #[error("Combined presentaion is missing data.")]
+    MissingData,
+    #[error("Missing aud or nonce")]
+    MissingAudNonce,
+    #[error("Error in signature validating: {0}")]
+    JWTError(String),
+}
+
+impl std::convert::From<JoseError> for SDError {
+    fn from(err: JoseError) -> Self {
+        SDError::JWTError(err.to_string())
+    }
+}
+
+type Result<T> = std::result::Result<T, SDError>;
 
 pub fn generate_salt() -> String {
     let mut rng = ChaCha20Rng::from_entropy();
@@ -194,6 +215,54 @@ pub fn create_sd_jwt_release(
 
     let sd_jwt_release = jwt::encode_with_signer(&payload, &header, &signer).unwrap();
     return (Value::Object(payload.claims_set().clone()), sd_jwt_release);
+}
+
+pub fn verify(
+    presentation: &str,
+    issuer_public_key: &Vec<u8>,
+    issuer_details: &str,
+    holder_public_key: Option<&Vec<u8>>,
+    aud: Option<&str>,
+    nonce: Option<&str>,
+) -> Result<bool> {
+    // If we are verifying the holder binding, then aud & nonce is must.
+
+    if holder_public_key.is_some() {
+        if aud.is_none() || nonce.is_none() {
+            return Err(SDError::MissingAudNonce);
+        }
+    }
+
+    // For now we assume that SD-JWT is signed by holder.
+    let parts: Vec<&str> = presentation.split(".").collect();
+    if parts.len() != 6 {
+        return Err(SDError::MissingData);
+    }
+
+    // Let us first get the issuer's public key
+
+    let issuer_keypair = RsaKeyPair::from_pem(issuer_public_key.clone()).unwrap();
+    let issuer_public_key = issuer_keypair.to_jwk_public_key();
+
+    let input_jwd = parts[..3].join(".");
+    match verify_sd_jwt(&input_jwd, issuer_public_key, issuer_details) {
+        Ok((payload, header)) => {
+            dbg!(payload);
+            dbg!(header);
+        }
+        Err(err) => {
+            println!("{}", err);
+        }
+    }
+
+    Ok(true)
+}
+
+fn verify_sd_jwt(jwt: &str, ipk: Jwk, issuer_details: &str) -> Result<(JwtPayload, JwsHeader)> {
+    let verifier = RS256.verifier_from_jwk(&ipk).unwrap();
+    let (payload, header) = jwt::decode_with_verifier(jwt, &verifier)?;
+
+    Ok((payload, header))
 }
 
 #[cfg(test)]

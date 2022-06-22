@@ -1,4 +1,4 @@
-use sd_jwt::{create_sd_jwt, create_sd_jwt_release, generate_salt};
+use sd_jwt::{create_sd_jwt, create_sd_jwt_release, generate_salt, verify};
 use serde_json;
 use serde_json::{json, Value};
 
@@ -33,6 +33,7 @@ fn main() {
     // }
     // dbg!(user_claims);
     let issuer_url = "https://example.com/issuer";
+    let aud = "https://example.com/verifier".to_string();
     let issuer = std::fs::read("./issuer.pem").unwrap();
 
     let (payload, jwt, svc_payload, svc_serialized) =
@@ -53,8 +54,8 @@ fn main() {
 
     let holder = std::fs::read("./holder.pem").unwrap();
     let (sd_jwt_payload, sd_jwt_release) = create_sd_jwt_release(
-        noanced,
-        "https://example.com/verifier".to_string(),
+        noanced.clone(),
+        aud.clone(),
         disclosed_claims,
         svc_serialized,
         &holder,
@@ -66,8 +67,18 @@ fn main() {
 
     println!("The serialized SD-JWT-RELEASE is: \n {}", sd_jwt_release);
 
+    let combined_presentation = format!("{}.{}", jwt, sd_jwt_release);
     println!(
         "\n\nThe combined presentation: \n\n{}\n\n",
-        format!("{}.{}", jwt, sd_jwt_release)
+        combined_presentation
     );
+    verify(
+        &combined_presentation,
+        &issuer,
+        issuer_url,
+        Some(&holder),
+        Some("issuer"),
+        Some(&noanced),
+    )
+    .unwrap();
 }
