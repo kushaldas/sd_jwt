@@ -1,4 +1,3 @@
-use base64_url;
 use constant_time_eq::constant_time_eq;
 use josekit::{
     jwk::alg::rsa::RsaKeyPair,
@@ -9,7 +8,6 @@ use josekit::{
 };
 use rand::prelude::*;
 use rand_chacha::ChaCha20Rng;
-use serde_json;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::str;
@@ -116,7 +114,7 @@ where
 pub fn hash_claim(salt: Value, value: Value, raw: bool) -> std::string::String {
     let raw_value = Value::Array(vec![salt, value]);
     let raw_string = raw_value.to_string();
-    if raw == true {
+    if raw {
         return raw_string;
     };
     hash_raw(&raw_string)
@@ -135,7 +133,7 @@ fn hash_raw(raw_string: &str) -> std::string::String {
 fn check_claim(_name: Value, released: Value, claimed_value: Value) -> Result<Value> {
     let hashed_value = hash_raw(released.as_str().unwrap());
     let claimed_hash = claimed_value.as_str().unwrap();
-    if !constant_time_eq(&hashed_value.as_bytes(), &claimed_hash.as_bytes()) {
+    if !constant_time_eq(hashed_value.as_bytes(), claimed_hash.as_bytes()) {
         return Err(SDError::DigestError(hashed_value, claimed_hash.to_string()));
     }
     let released_values: Value = match released.as_str() {
@@ -237,7 +235,7 @@ pub fn create_sd_jwt_release(
 
     let decoded_vec = base64_url::decode(&svc_payload_serialized).unwrap();
     let decoded = str::from_utf8(&decoded_vec).unwrap();
-    let svc_claims_outer: Value = serde_json::from_str(&decoded).unwrap();
+    let svc_claims_outer: Value = serde_json::from_str(decoded).unwrap();
     let svc_raw_values = svc_claims_outer.as_object().unwrap().get("_sd").unwrap();
 
     let get_raw_lambda = |_: Value, _: Value, raw: Value| Ok(raw);
@@ -271,7 +269,7 @@ pub fn create_sd_jwt_release(
 
 pub fn verify(
     presentation: &str,
-    issuer_public_key: &Vec<u8>,
+    issuer_public_key: &[u8],
     issuer_details: &str,
     holder_public_key: Option<&Vec<u8>>,
     aud: Option<&str>,
@@ -279,21 +277,19 @@ pub fn verify(
 ) -> Result<Value> {
     // If we are verifying the holder binding, then aud & nonce is must.
 
-    if holder_public_key.is_some() {
-        if aud.is_none() || nonce.is_none() {
-            return Err(SDError::MissingAudNonce);
-        }
+    if holder_public_key.is_some() && (aud.is_none() || nonce.is_none()) {
+        return Err(SDError::MissingAudNonce);
     }
 
     // For now we assume that SD-JWT is signed by holder.
-    let parts: Vec<&str> = presentation.split(".").collect();
+    let parts: Vec<&str> = presentation.split('.').collect();
     if parts.len() != 6 {
         return Err(SDError::MissingData);
     }
 
     // Let us first get the issuer's public key
 
-    let issuer_keypair = RsaKeyPair::from_pem(issuer_public_key.clone()).unwrap();
+    let issuer_keypair = RsaKeyPair::from_pem(issuer_public_key).unwrap();
     let issuer_public_key = issuer_keypair.to_jwk_public_key();
 
     // This is the sd-jwt
@@ -347,11 +343,10 @@ fn verify_sd_jwt_release(
     nonce: Option<&str>,
 ) -> Result<Value> {
     // If we are checking for holdering binding then there must be sub_jwk
-    if hpk.is_some() {
-        if hpk_payload.is_none() {
-            return Err(SDError::SubJwkMissing);
-        }
+    if hpk.is_some() && hpk_payload.is_none() {
+        return Err(SDError::SubJwkMissing);
     }
+
     let (payload, _header) = match hpk {
         Some(value) => {
             let holder_key = get_public_key(value);
@@ -397,7 +392,7 @@ fn verify_sd_jwt_release(
     // Now verify that _sd is there in the sd-jwt-release
     match payload.claim("_sd") {
         Some(value) => Ok(value.clone()),
-        None => return Err(SDError::SDJwtReleaseError),
+        None => Err(SDError::SDJwtReleaseError),
     }
 }
 
