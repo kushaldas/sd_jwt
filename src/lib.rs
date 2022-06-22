@@ -2,8 +2,8 @@ use base64_url;
 use constant_time_eq::constant_time_eq;
 use josekit::{
     jwk::alg::rsa::RsaKeyPair,
-    jwk::{self, Jwk},
-    jws::{JwsHeader, JwsVerifier, RS256},
+    jwk::Jwk,
+    jws::{JwsHeader, RS256},
     jwt::{self, JwtPayload},
     JoseError,
 };
@@ -163,7 +163,6 @@ pub fn create_sd_jwt(
     exp: Option<u64>,
     holder: Option<&Vec<u8>>,
 ) -> Result<(Value, String, Value, String)> {
-    let keypair = RsaKeyPair::from_pem(issuer).unwrap();
     let signer = RS256.signer_from_pem(issuer).unwrap();
 
     let gen_salts_lambda = |_: Value, _: Value, _: Value| Ok(Value::String(generate_salt()));
@@ -301,7 +300,7 @@ pub fn verify(
     let input_jwd = parts[..3].join(".");
     // This is the sd-jwt-release
     let input_release_payload = parts[3..].join(".");
-    let (payload, header) = verify_sd_jwt(&input_jwd, issuer_public_key, issuer_details)?;
+    let (payload, _header) = verify_sd_jwt(&input_jwd, issuer_public_key, issuer_details)?;
 
     // TODO: JWT header should not be None.
 
@@ -353,7 +352,7 @@ fn verify_sd_jwt_release(
             return Err(SDError::SubJwkMissing);
         }
     }
-    let (payload, header) = match hpk {
+    let (payload, _header) = match hpk {
         Some(value) => {
             let holder_key = get_public_key(value);
             if let Some(key_from_payload) = hpk_payload {
