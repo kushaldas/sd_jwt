@@ -34,10 +34,19 @@ fn main() {
     // dbg!(user_claims);
     let issuer_url = "https://example.com/issuer";
     let aud = "https://example.com/verifier".to_string();
-    let issuer = std::fs::read("./issuer.pem").unwrap();
 
-    let (payload, jwt, svc_payload, svc_serialized) =
-        create_sd_jwt(&issuer, &issuer_url, user_claims, Some(1516247022));
+    // Read the pem files for keys
+    let issuer = std::fs::read("./issuer.pem").unwrap();
+    let holder = std::fs::read("./holder.pem").unwrap();
+
+    // Now create the SD-JWT
+    let (payload, jwt, svc_payload, svc_serialized) = create_sd_jwt(
+        &issuer,
+        &issuer_url,
+        user_claims,
+        Some(1516247022),
+        Some(&holder),
+    );
 
     println!(
         "The SD-JWT is:\n {}",
@@ -52,7 +61,6 @@ fn main() {
 
     println!("\n\n\n\n");
 
-    let holder = std::fs::read("./holder.pem").unwrap();
     let (sd_jwt_payload, sd_jwt_release) = create_sd_jwt_release(
         noanced.clone(),
         aud.clone(),
@@ -72,12 +80,13 @@ fn main() {
         "\n\nThe combined presentation: \n\n{}\n\n",
         combined_presentation
     );
+
     verify(
         &combined_presentation,
         &issuer,
         issuer_url,
         Some(&holder),
-        Some("issuer"),
+        Some(&aud),
         Some(&noanced),
     )
     .unwrap();

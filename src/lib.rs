@@ -19,10 +19,24 @@ use thiserror::Error;
 pub enum SDError {
     #[error("Combined presentaion is missing data.")]
     MissingData,
-    #[error("Missing aud or nonce")]
+    #[error("Missing aud or nonce.")]
     MissingAudNonce,
     #[error("Error in signature validating: {0}")]
     JWTError(String),
+    #[error("Missing _sd claim in the JWT.")]
+    SDClaimMissing,
+    #[error("Missing sub_jwk dictionary in JWT.")]
+    SubJwkMissing,
+    #[error("Issuer not matching in the JWT.")]
+    IssuerError,
+    #[error("Holdering binding key is not matching in SD-JWT-RELEASE.")]
+    BindingKeyError,
+    #[error("aud value is not matching.")]
+    AudError,
+    #[error("nonce value is not matching")]
+    NonceError,
+    #[error("No selective disclosure claims in SD-JWT-Release")]
+    SDJwtReleaseError,
 }
 
 impl std::convert::From<JoseError> for SDError {
@@ -39,6 +53,14 @@ pub fn generate_salt() -> String {
     rng.fill_bytes(&mut data);
     base64_url::encode(&data)
 }
+
+pub fn get_public_key(key_material: &Vec<u8>) -> Jwk {
+    let keypair = RsaKeyPair::from_pem(key_material).unwrap();
+    keypair.to_jwk_public_key()
+}
+
+
+
 
 pub fn walk_by_structure<T>(structure: Value, obj: Value, func: &T) -> Value
 where
@@ -110,9 +132,9 @@ pub fn create_sd_jwt(
     issuer_url: &str,
     user_claims: Value,
     exp: Option<u64>,
+    holder: Option<&Vec<u8>>,
 ) -> (Value, String, Value, String) {
     let keypair = RsaKeyPair::from_pem(issuer).unwrap();
-    let public_key = keypair.to_jwk_public_key();
     let signer = RS256.signer_from_pem(issuer).unwrap();
 
     let gen_salts_lambda = |_: Value, _: Value, _: Value| Value::String(generate_salt());
@@ -139,7 +161,6 @@ pub fn create_sd_jwt(
     let mut header = JwsHeader::new();
     header.set_token_type("JWT");
 
-    let jwk_value: serde_json::Map<String, Value> = public_key.into();
     let mut payload = JwtPayload::new();
     // TODO: sub value must be updated later
     payload.set_subject("subject");
@@ -154,11 +175,14 @@ pub fn create_sd_jwt(
         payload.set_claim("exp", Some(exp_as_number)).unwrap();
     };
 
-    // Set the public key
-    payload
-        .set_claim("sub_jwk", Some(Value::Object(jwk_value)))
-        .unwrap();
-
+    // Set the holder binding key
+    if let Some(holder_key_pem) = holder {
+        let holder_public_key = get_public_key(holder_key_pem);
+        let jwk_value: serde_json::Map<String, Value> = holder_public_key.into();
+        payload
+            .set_claim("sub_jwk", Some(Value::Object(jwk_value)))
+            .unwrap();
+    }
     // Now add the salted values
     payload.set_claim("_sd", Some(sd_claims)).unwrap();
 
@@ -244,23 +268,125 @@ pub fn verify(
     let issuer_keypair = RsaKeyPair::from_pem(issuer_public_key.clone()).unwrap();
     let issuer_public_key = issuer_keypair.to_jwk_public_key();
 
+    // This is the sd-jwt
     let input_jwd = parts[..3].join(".");
-    match verify_sd_jwt(&input_jwd, issuer_public_key, issuer_details) {
-        Ok((payload, header)) => {
-            dbg!(payload);
-            dbg!(header);
+    // This is the sd-jwt-release
+    let input_release_payload = parts[3..].join(".");
+    let (payload, header) = verify_sd_jwt(&input_jwd, issuer_public_key, issuer_details)?;
+
+    // TODO: JWT header should not be None.
+
+    let sd_jwt_claims = match payload.claim("_sd") {
+        Some(claims) => claims.clone(),
+        None => {
+            return Err(SDError::SDClaimMissing);
         }
-        Err(err) => {
-            println!("{}", err);
+    };
+
+    // Let us try to get the holder's public key material from the payload
+    let holder_public_jwk: Option<Jwk> = match payload.claim("sub_jwk") {
+        Some(value) => {
+            let key_materials = if let Some(data) = value.as_object() {
+                data
+            } else {
+                return Err(SDError::SubJwkMissing);
+            };
+
+            Some(Jwk::from_map(key_materials.clone())?)
+        }
+        None => None,
+    };
+
+    let sd_jwt_release_claims = verify_sd_jwt_release(
+        &input_release_payload,
+        holder_public_key,
+        holder_public_jwk,
+        aud,
+        nonce,
+    )?;
+
+    dbg!(sd_jwt_claims);
+    dbg!(sd_jwt_release_claims);
+
+    Ok(true)
+}
+
+fn verify_sd_jwt_release(
+    jwt: &str,
+    hpk: Option<&Vec<u8>>,
+    hpk_payload: Option<Jwk>,
+    aud: Option<&str>,
+    nonce: Option<&str>,
+) -> Result<Value> {
+    // If we are checking for holdering binding then there must be sub_jwk
+    if hpk.is_some() {
+        if hpk_payload.is_none() {
+            return Err(SDError::SubJwkMissing);
+        }
+    }
+    let (payload, header) = match hpk {
+        Some(value) => {
+            let holder_key = get_public_key(value);
+            if let Some(key_from_payload) = hpk_payload {
+                // Now match if this matches with the key from payload
+                if holder_key != key_from_payload {
+                    return Err(SDError::BindingKeyError);
+                };
+            }
+            // Now let us create a verifier
+            let verifier = RS256.verifier_from_jwk(&holder_key).unwrap();
+
+            // Now verify the signature
+            jwt::decode_with_verifier(jwt, &verifier)?
+        }
+        None => jwt::decode_unsecured(jwt)?,
+    };
+
+    // Now verify the aud value
+    if let Some(aud) = aud {
+        match payload.claim("aud") {
+            Some(aud_claim) => {
+                if aud_claim.as_str().unwrap() != aud {
+                    return Err(SDError::AudError);
+                }
+            }
+            None => return Err(SDError::AudError),
+        }
+    }
+    // Now verify the nonce value
+    if let Some(nonce) = nonce {
+        match payload.claim("nonce") {
+            Some(nonce_claim) => {
+                let ncs = nonce_claim.as_str().unwrap();
+                if ncs != nonce {
+                    return Err(SDError::NonceError);
+                }
+            }
+            None => return Err(SDError::NonceError),
         }
     }
 
-    Ok(true)
+    // Now verify that _sd is there in the sd-jwt-release
+    match payload.claim("_sd") {
+        Some(value) => Ok(value.clone()),
+        None => return Err(SDError::SDJwtReleaseError),
+    }
 }
 
 fn verify_sd_jwt(jwt: &str, ipk: Jwk, issuer_details: &str) -> Result<(JwtPayload, JwsHeader)> {
     let verifier = RS256.verifier_from_jwk(&ipk).unwrap();
     let (payload, header) = jwt::decode_with_verifier(jwt, &verifier)?;
+
+    match payload.claim("iss") {
+        Some(issuer) => {
+            if issuer.as_str().unwrap() != issuer_details {
+                return Err(SDError::IssuerError);
+            }
+        }
+        None => {
+            return Err(SDError::IssuerError);
+        }
+    }
 
     Ok((payload, header))
 }
