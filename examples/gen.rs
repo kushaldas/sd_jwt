@@ -46,7 +46,8 @@ fn main() {
         user_claims,
         Some(1516247022),
         Some(&holder),
-    );
+    )
+    .unwrap();
 
     println!(
         "The SD-JWT is:\n {}",
@@ -67,7 +68,8 @@ fn main() {
         disclosed_claims,
         svc_serialized,
         &holder,
-    );
+    )
+    .unwrap();
     println!(
         "The payload for SD-JWT-RELEASE:\n {}",
         serde_json::ser::to_string_pretty(&sd_jwt_payload).unwrap()

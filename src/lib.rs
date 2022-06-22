@@ -59,12 +59,9 @@ pub fn get_public_key(key_material: &Vec<u8>) -> Jwk {
     keypair.to_jwk_public_key()
 }
 
-
-
-
-pub fn walk_by_structure<T>(structure: Value, obj: Value, func: &T) -> Value
+pub fn walk_by_structure<T>(structure: Value, obj: Value, func: &T) -> Result<Value>
 where
-    T: Fn(Value, Value, Value) -> Value,
+    T: Fn(Value, Value, Value) -> Result<Value>,
 {
     let mut out = serde_json::Map::new();
 
@@ -76,7 +73,7 @@ where
             if structure_value.is_object() {
                 out.insert(
                     String::from(key),
-                    walk_by_structure(structure_value, value.clone(), func),
+                    walk_by_structure(structure_value, value.clone(), func)?,
                 );
             } else if structure_value.is_array() {
                 let mut list_res: Vec<Value> = Vec::new();
@@ -86,7 +83,7 @@ where
                         structure_value_inside,
                         item.clone(),
                         func,
-                    ));
+                    )?);
                 }
             } else {
                 out.insert(
@@ -95,18 +92,18 @@ where
                         Value::String(key.to_string()),
                         value.clone(),
                         structure_value,
-                    ),
+                    )?,
                 );
             }
         } else {
             out.insert(
                 String::from(key),
-                func(Value::String(key.to_string()), value.clone(), Value::Null),
+                func(Value::String(key.to_string()), value.clone(), Value::Null)?,
             );
         }
     }
 
-    Value::Object(out)
+    Ok(Value::Object(out))
 }
 
 pub fn hash_claim(salt: Value, value: Value, raw: bool) -> std::string::String {
@@ -133,26 +130,26 @@ pub fn create_sd_jwt(
     user_claims: Value,
     exp: Option<u64>,
     holder: Option<&Vec<u8>>,
-) -> (Value, String, Value, String) {
+) -> Result<(Value, String, Value, String)> {
     let keypair = RsaKeyPair::from_pem(issuer).unwrap();
     let signer = RS256.signer_from_pem(issuer).unwrap();
 
-    let gen_salts_lambda = |_: Value, _: Value, _: Value| Value::String(generate_salt());
-    let sd_claims_lambda = |_: Value, v, salt| Value::String(hash_claim(salt, v, false));
-    let sd_svc_lambda = |_: Value, v, salt| Value::String(hash_claim(salt, v, true));
+    let gen_salts_lambda = |_: Value, _: Value, _: Value| Ok(Value::String(generate_salt()));
+    let sd_claims_lambda = |_: Value, v, salt| Ok(Value::String(hash_claim(salt, v, false)));
+    let sd_svc_lambda = |_: Value, v, salt| Ok(Value::String(hash_claim(salt, v, true)));
 
     // Let us get the salts
     let salts = walk_by_structure(
         Value::Object(serde_json::Map::new()),
         user_claims.clone(),
         &gen_salts_lambda,
-    );
+    )?;
 
-    let sd_claims = walk_by_structure(salts.clone(), user_claims.clone(), &sd_claims_lambda);
+    let sd_claims = walk_by_structure(salts.clone(), user_claims.clone(), &sd_claims_lambda)?;
     let mut svc_payload_map = serde_json::Map::new();
     svc_payload_map.insert(
         "_sd".into(),
-        walk_by_structure(salts, user_claims, &sd_svc_lambda),
+        walk_by_structure(salts, user_claims, &sd_svc_lambda)?,
     );
     let svc_payload = Value::Object(svc_payload_map);
 
@@ -188,12 +185,12 @@ pub fn create_sd_jwt(
 
     let jwt = jwt::encode_with_signer(&payload, &header, &signer).unwrap();
 
-    return (
+    return Ok((
         Value::Object(payload.claims_set().clone()),
         jwt,
         svc_payload,
         svc_payload_serialized,
-    );
+    ));
 }
 
 pub fn create_sd_jwt_release(
@@ -202,7 +199,7 @@ pub fn create_sd_jwt_release(
     disclosed_claims: Value,
     svc_payload_serialized: String,
     holder: &Vec<u8>,
-) -> (Value, std::string::String) {
+) -> Result<(Value, std::string::String)> {
     let keypair = RsaKeyPair::from_pem(holder).unwrap();
     let public_key = keypair.to_jwk_public_key();
     let signer = RS256.signer_from_pem(holder).unwrap();
@@ -212,7 +209,7 @@ pub fn create_sd_jwt_release(
     let svc_claims_outer: Value = serde_json::from_str(&decoded).unwrap();
     let svc_raw_values = svc_claims_outer.as_object().unwrap().get("_sd").unwrap();
 
-    let get_raw_lambda = |_: Value, _: Value, raw: Value| raw;
+    let get_raw_lambda = |_: Value, _: Value, raw: Value| Ok(raw);
 
     let mut header = JwsHeader::new();
     header.set_token_type("JWT");
@@ -231,14 +228,14 @@ pub fn create_sd_jwt_release(
     //     .unwrap();
 
     let svc_disclosed_claims =
-        walk_by_structure(svc_raw_values.clone(), disclosed_claims, &get_raw_lambda);
+        walk_by_structure(svc_raw_values.clone(), disclosed_claims, &get_raw_lambda)?;
     // Now add the svc_disclised_claims
     payload
         .set_claim("_sd", Some(svc_disclosed_claims))
         .unwrap();
 
     let sd_jwt_release = jwt::encode_with_signer(&payload, &header, &signer).unwrap();
-    return (Value::Object(payload.claims_set().clone()), sd_jwt_release);
+    return Ok((Value::Object(payload.claims_set().clone()), sd_jwt_release));
 }
 
 pub fn verify(
@@ -395,9 +392,9 @@ fn verify_sd_jwt(jwt: &str, ipk: Jwk, issuer_details: &str) -> Result<(JwtPayloa
 mod tests {
     use super::*;
     use serde_json::{json, Value};
-    fn test_fn(key: Value, value: Value, value_in_structure: Value) -> Value {
+    fn test_fn(key: Value, value: Value, value_in_structure: Value) -> Result<Value> {
         let result = format!("called fn({}, {}, {})", key, value, value_in_structure);
-        Value::String(result)
+        Ok(Value::String(result))
     }
     #[test]
     fn first_check_for_simple_values() {
@@ -428,7 +425,7 @@ mod tests {
   "birthdate": "called fn(\"birthdate\", \"1940-01-01\", null)"
 }"#;
 
-        let output = walk_by_structure(structure, user_claims, &test_fn);
+        let output = walk_by_structure(structure, user_claims, &test_fn).unwrap();
         let json_output = format!("{}", serde_json::ser::to_string_pretty(&output).unwrap());
         assert_eq!(result, json_output);
     }
