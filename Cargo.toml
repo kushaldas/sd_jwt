@@ -1,8 +1,17 @@
 
 [package]
-name = "sd-jwt"
+name = "sd_jwt"
 version = "0.0.1"
 edition = "2021"
+description = "An implementation of SD-JWT draft."
+documentation = "https://docs.rs/sd_jwt"
+homepage = "https://github.com/kushaldas/sd_jwt"
+repository = "https://github.com/kushaldas/sd_jwt"
+license = "MIT OR Apache-2.0"
+exclude = ["*.pem"]
+readme = "README.md"
+categories = ["authentication"]
+
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
