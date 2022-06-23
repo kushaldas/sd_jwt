@@ -179,9 +179,9 @@ fn check_claim(_name: Value, released: Value, claimed_value: Value) -> Result<Va
     Ok(released_values[1].clone())
 }
 
-fn internal_hash(raw_value: &Value) -> std::string::String {
-    let encoded = serde_json::ser::to_string_pretty(raw_value).unwrap();
-    base64_url::encode(&encoded)
+fn internal_hash(raw_value: &Value) -> Result<std::string::String> {
+    let encoded = serde_json::ser::to_string_pretty(raw_value)?;
+    Ok(base64_url::encode(&encoded))
 }
 
 pub fn create_sd_jwt(
@@ -212,7 +212,7 @@ pub fn create_sd_jwt(
     );
     let svc_payload = Value::Object(svc_payload_map);
 
-    let svc_payload_serialized = internal_hash(&svc_payload);
+    let svc_payload_serialized = internal_hash(&svc_payload)?;
 
     let mut header = JwsHeader::new();
     header.set_token_type("JWT");
