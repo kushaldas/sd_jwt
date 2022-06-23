@@ -42,6 +42,8 @@ pub enum SDError {
     ReleasedClaimListError,
     #[error("Released claimed value does not have 2 entries.")]
     ReleasedClaimLengthError,
+    #[error("Missing value in an option/JSON datastructure")]
+    MissingValueError,
 }
 
 impl std::convert::From<JoseError> for SDError {
@@ -70,9 +72,18 @@ where
 {
     let mut out = serde_json::Map::new();
 
-    let sturcture_obj = structure.as_object().unwrap();
+    let sturcture_obj = match structure.as_object() {
+        Some(val) => val,
+        None => return Err(SDError::MissingValueError),
+    };
 
-    for (key, value) in obj.as_object().unwrap().iter() {
+    let iter_obj = match obj.as_object() {
+        Some(val) => val,
+        None => return Err(SDError::MissingValueError),
+    };
+
+    // Now we can safely loop over the map
+    for (key, value) in iter_obj.iter() {
         if sturcture_obj.contains_key(key) {
             let structure_value = sturcture_obj[key].clone();
             if structure_value.is_object() {
@@ -81,8 +92,14 @@ where
                     walk_by_structure(structure_value, value.clone(), func)?,
                 );
             } else if structure_value.is_array() {
+                // Empty list for results
                 let mut list_res: Vec<Value> = Vec::new();
-                for item in value.as_array().unwrap() {
+                let temp_value_array = match value.as_array() {
+                    Some(val) => val,
+                    None => return Err(SDError::MissingValueError),
+                };
+                // Now we can safely loop over the array
+                for item in temp_value_array {
                     let structure_value_inside = structure_value.as_array().unwrap()[0].clone();
                     list_res.push(walk_by_structure(
                         structure_value_inside,
