@@ -49,6 +49,8 @@ pub enum SDError {
     JsonError(String),
     #[error("Base64 encoding/decoding error.")]
     Base64Error,
+    #[error("UTF-8 convertion error.")]
+    Utf8Error,
 }
 
 impl std::convert::From<JoseError> for SDError {
@@ -66,6 +68,12 @@ impl std::convert::From<serde_json::Error> for SDError {
 impl std::convert::From<base64::DecodeError> for SDError {
     fn from(_err: base64::DecodeError) -> Self {
         SDError::Base64Error
+    }
+}
+
+impl std::convert::From<std::str::Utf8Error> for SDError {
+    fn from(_err: std::str::Utf8Error) -> Self {
+        SDError::Utf8Error
     }
 }
 
@@ -202,7 +210,7 @@ pub fn create_sd_jwt(
     exp: Option<u64>,
     holder: Option<&Vec<u8>>,
 ) -> Result<(Value, String, Value, String)> {
-    let signer = RS256.signer_from_pem(issuer).unwrap();
+    let signer = RS256.signer_from_pem(issuer)?;
 
     let gen_salts_lambda = |_: Value, _: Value, _: Value| Ok(Value::String(generate_salt()));
     let sd_claims_lambda = |_: Value, v, salt| Ok(Value::String(hash_claim(salt, v, false)));
@@ -273,7 +281,7 @@ pub fn create_sd_jwt_release(
     let signer = RS256.signer_from_pem(holder)?;
 
     let decoded_vec = base64_url::decode(&svc_payload_serialized)?;
-    let decoded = str::from_utf8(&decoded_vec).unwrap();
+    let decoded = str::from_utf8(&decoded_vec)?;
     let svc_claims_outer: Value = serde_json::from_str(decoded).unwrap();
     let svc_raw_values = svc_claims_outer.as_object().unwrap().get("_sd").unwrap();
 
