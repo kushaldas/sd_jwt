@@ -502,4 +502,74 @@ mod tests {
         let json_output = format!("{}", serde_json::ser::to_string_pretty(&output).unwrap());
         assert_eq!(result, json_output);
     }
+
+    #[test]
+    fn full_run() {
+        let user_claims = json!( {
+            "sub": "6c5c0a49-b589-431d-bae7-219122a9ec2c",
+            "given_name": "John",
+            "family_name": "Doe",
+            "email": "johndoe@example.com",
+            "phone_number": "+1-202-555-0101",
+            "address": {
+                "street_address": "123 Main St",
+                "locality": "Anytown",
+                "region": "Anystate",
+                "country": "US",
+            },
+            "birthdate": "1940-01-01",
+        });
+
+        let disclosed_claims_raw = r#"
+    {
+        "given_name": "",
+        "family_name": "",
+        "address": ""
+    }
+    "#;
+        let disclosed_claims: Value = serde_json::from_str(disclosed_claims_raw).unwrap();
+
+        let noanced = generate_salt();
+        let issuer_url = "https://example.com/issuer";
+        let aud = "https://example.com/verifier".to_string();
+
+        // Read the pem files for keys
+        let issuer = std::fs::read("./issuer.pem").unwrap();
+        let holder = std::fs::read("./holder.pem").unwrap();
+
+        // Now create the SD-JWT
+        let (_payload, jwt, _svc_payload, svc_serialized) = create_sd_jwt(
+            &issuer,
+            &issuer_url,
+            user_claims,
+            Some(1516247022),
+            Some(&holder),
+        )
+        .unwrap();
+
+        let (_sd_jwt_payload, sd_jwt_release) = create_sd_jwt_release(
+            noanced.clone(),
+            aud.clone(),
+            disclosed_claims,
+            svc_serialized,
+            &holder,
+        )
+        .unwrap();
+
+        let combined_presentation = format!("{}.{}", jwt, sd_jwt_release);
+
+        let verified_values = verify(
+            &combined_presentation,
+            &issuer,
+            issuer_url,
+            Some(&holder),
+            Some(&aud),
+            Some(&noanced),
+        )
+        .unwrap();
+
+        let result = serde_json::to_string(&verified_values).unwrap();
+        let fixed_result = r#"{"given_name":"John","family_name":"Doe","address":{"street_address":"123 Main St","locality":"Anytown","region":"Anystate","country":"US"}}"#;
+        assert_eq!(fixed_result, result);
+    }
 }
