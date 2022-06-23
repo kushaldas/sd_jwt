@@ -169,7 +169,9 @@ fn check_claim(_name: Value, released: Value, claimed_value: Value) -> Result<Va
         None => return Err(SDError::ReleasedClaimListError),
     };
 
-    let released_values = released_values.as_array().unwrap();
+    let released_values = released_values
+        .as_array()
+        .ok_or(SDError::MissingValueError)?;
     if released_values.len() != 2 {
         return Err(SDError::ReleasedClaimLengthError);
     }
