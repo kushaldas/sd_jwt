@@ -1,3 +1,8 @@
+//! # sd_jwt
+//!
+//! `sd_jwt` is an implementation of the [SD-JWT](https://www.ietf.org/archive/id/draft-fett-selective-disclosure-jwt-00.html) draft.
+//! Not ready for production yet.
+
 use base64;
 use constant_time_eq::constant_time_eq;
 use josekit::{
@@ -79,6 +84,8 @@ impl std::convert::From<std::str::Utf8Error> for SDError {
 
 type Result<T> = std::result::Result<T, SDError>;
 
+/// Returns a random base64 encoded String which can be used
+/// as salt.
 pub fn generate_salt() -> String {
     let mut rng = ChaCha20Rng::from_entropy();
     let mut data = [0u8; 16];
@@ -86,12 +93,13 @@ pub fn generate_salt() -> String {
     base64_url::encode(&data)
 }
 
+/// Returns a `JWK` object from a PEM file content.
 pub fn get_public_key(key_material: &Vec<u8>) -> Result<Jwk> {
     let keypair = RsaKeyPair::from_pem(key_material)?;
     Ok(keypair.to_jwk_public_key())
 }
 
-pub fn walk_by_structure<T>(structure: Value, obj: Value, func: &T) -> Result<Value>
+fn walk_by_structure<T>(structure: Value, obj: Value, func: &T) -> Result<Value>
 where
     T: Fn(Value, Value, Value) -> Result<Value>,
 {
@@ -158,7 +166,7 @@ where
     Ok(Value::Object(out))
 }
 
-pub fn hash_claim(salt: Value, value: Value, raw: bool) -> std::string::String {
+fn hash_claim(salt: Value, value: Value, raw: bool) -> std::string::String {
     let raw_value = Value::Array(vec![salt, value]);
     let raw_string = raw_value.to_string();
     if raw {
@@ -203,6 +211,15 @@ fn internal_hash(raw_value: &Value) -> Result<std::string::String> {
     Ok(base64_url::encode(&encoded))
 }
 
+/// Returns a Value, sd-jwt as serialized string, SVC value, and svc as serialized string.
+///
+/// # Arguments
+///
+/// * `issuer` - The issuer RSA certificate as a reference to Vec<u8>.
+/// * `issuer_url` - The reference to the issuer URL.
+/// * `user_claims` - The map of user claims to be added in the JWT.
+/// * `exp` - Optional expiration value as u64.
+/// * `holder` - Optional holder binding public key
 pub fn create_sd_jwt(
     issuer: &Vec<u8>,
     issuer_url: &str,
@@ -269,6 +286,15 @@ pub fn create_sd_jwt(
     ));
 }
 
+/// Returns the sd-jwt-release value and serialized string.
+///
+/// # Arguments
+///
+/// * `nonce` - The nonce value as String.
+/// * `aud` - The expected audience of the released JWT.
+/// * `disclosed_claims` - The claims we are going to disclose.
+/// * `svc_payload_serialized` - The serialized SVC payload
+/// * `holder` - The reference to the holder's key.
 pub fn create_sd_jwt_release(
     nonce: String,
     aud: String,
@@ -314,6 +340,16 @@ pub fn create_sd_jwt_release(
     return Ok((Value::Object(payload.claims_set().clone()), sd_jwt_release));
 }
 
+/// Verifies the given sd-jwt-release and returns the verified claims as `serde_json::Value`.
+///
+/// # Arguments
+///
+/// * `presentation` - A reference to the combined representation.
+/// * `issuer_public_key` - Reference to the issuer's public key material.
+/// * `issuer_details` - The issuer URL which will be verified.
+/// * `holder_public_key` - Optional, if given it will matched against.
+/// * `aud` - Optional audience value to be verified.
+/// * `nonce` - Optional nonce value to be verified.
 pub fn verify(
     presentation: &str,
     issuer_public_key: &[u8],

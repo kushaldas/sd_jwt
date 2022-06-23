@@ -5,6 +5,10 @@ This is an implementation of the [SD-JWT](https://www.ietf.org/archive/id/draft-
 Do not use it in production yet.
 
 
+# Example
+
+Please check the `examples` diretory for the usage.
+
 ## License
 
 Licensed under either of
