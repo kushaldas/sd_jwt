@@ -100,7 +100,12 @@ where
                 };
                 // Now we can safely loop over the array
                 for item in temp_value_array {
-                    let structure_value_inside = structure_value.as_array().unwrap()[0].clone();
+                    let structure_value_inside = structure_value
+                        .as_array()
+                        .ok_or(SDError::MissingValueError)?
+                        .get(0)
+                        .ok_or(SDError::MissingValueError)?
+                        .clone();
                     list_res.push(walk_by_structure(
                         structure_value_inside,
                         item.clone(),
@@ -148,8 +153,8 @@ fn hash_raw(raw_string: &str) -> std::string::String {
 }
 
 fn check_claim(_name: Value, released: Value, claimed_value: Value) -> Result<Value> {
-    let hashed_value = hash_raw(released.as_str().unwrap());
-    let claimed_hash = claimed_value.as_str().unwrap();
+    let hashed_value = hash_raw(released.as_str().ok_or(SDError::MissingValueError)?);
+    let claimed_hash = claimed_value.as_str().ok_or(SDError::MissingValueError)?;
     if !constant_time_eq(hashed_value.as_bytes(), claimed_hash.as_bytes()) {
         return Err(SDError::DigestError(hashed_value, claimed_hash.to_string()));
     }
