@@ -363,6 +363,7 @@ checksum = "f3f6f92acf49d1b98f7a81226834412ada05458b7364277387724a237f062695"
 name = "sd-jwt"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "base64-url",
  "constant_time_eq",
  "josekit",

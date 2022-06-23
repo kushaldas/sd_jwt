@@ -1,3 +1,4 @@
+use base64;
 use constant_time_eq::constant_time_eq;
 use josekit::{
     jwk::alg::rsa::RsaKeyPair,
@@ -46,6 +47,8 @@ pub enum SDError {
     MissingValueError,
     #[error("Error in JSON convertion: {0}")]
     JsonError(String),
+    #[error("Base64 encoding/decoding error.")]
+    Base64Error,
 }
 
 impl std::convert::From<JoseError> for SDError {
@@ -53,11 +56,19 @@ impl std::convert::From<JoseError> for SDError {
         SDError::JWTError(err.to_string())
     }
 }
+
 impl std::convert::From<serde_json::Error> for SDError {
     fn from(err: serde_json::Error) -> Self {
         SDError::JsonError(err.to_string())
     }
 }
+
+impl std::convert::From<base64::DecodeError> for SDError {
+    fn from(_err: base64::DecodeError) -> Self {
+        SDError::Base64Error
+    }
+}
+
 type Result<T> = std::result::Result<T, SDError>;
 
 pub fn generate_salt() -> String {
@@ -228,21 +239,19 @@ pub fn create_sd_jwt(
 
     if let Some(exp_value) = exp {
         let exp_as_number: serde_json::Value = exp_value.into();
-        payload.set_claim("exp", Some(exp_as_number)).unwrap();
+        payload.set_claim("exp", Some(exp_as_number))?;
     };
 
     // Set the holder binding key
     if let Some(holder_key_pem) = holder {
         let holder_public_key = get_public_key(holder_key_pem)?;
         let jwk_value: serde_json::Map<String, Value> = holder_public_key.into();
-        payload
-            .set_claim("sub_jwk", Some(Value::Object(jwk_value)))
-            .unwrap();
+        payload.set_claim("sub_jwk", Some(Value::Object(jwk_value)))?;
     }
     // Now add the salted values
-    payload.set_claim("_sd", Some(sd_claims)).unwrap();
+    payload.set_claim("_sd", Some(sd_claims))?;
 
-    let jwt = jwt::encode_with_signer(&payload, &header, &signer).unwrap();
+    let jwt = jwt::encode_with_signer(&payload, &header, &signer)?;
 
     return Ok((
         Value::Object(payload.claims_set().clone()),
@@ -259,11 +268,11 @@ pub fn create_sd_jwt_release(
     svc_payload_serialized: String,
     holder: &Vec<u8>,
 ) -> Result<(Value, std::string::String)> {
-    let keypair = RsaKeyPair::from_pem(holder).unwrap();
+    let keypair = RsaKeyPair::from_pem(holder)?;
     let public_key = keypair.to_jwk_public_key();
-    let signer = RS256.signer_from_pem(holder).unwrap();
+    let signer = RS256.signer_from_pem(holder)?;
 
-    let decoded_vec = base64_url::decode(&svc_payload_serialized).unwrap();
+    let decoded_vec = base64_url::decode(&svc_payload_serialized)?;
     let decoded = str::from_utf8(&decoded_vec).unwrap();
     let svc_claims_outer: Value = serde_json::from_str(decoded).unwrap();
     let svc_raw_values = svc_claims_outer.as_object().unwrap().get("_sd").unwrap();
