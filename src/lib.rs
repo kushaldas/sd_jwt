@@ -44,6 +44,8 @@ pub enum SDError {
     ReleasedClaimLengthError,
     #[error("Missing value in an option/JSON datastructure")]
     MissingValueError,
+    #[error("Error in JSON convertion: {0}")]
+    JsonError(String),
 }
 
 impl std::convert::From<JoseError> for SDError {
@@ -51,7 +53,11 @@ impl std::convert::From<JoseError> for SDError {
         SDError::JWTError(err.to_string())
     }
 }
-
+impl std::convert::From<serde_json::Error> for SDError {
+    fn from(err: serde_json::Error) -> Self {
+        SDError::JsonError(err.to_string())
+    }
+}
 type Result<T> = std::result::Result<T, SDError>;
 
 pub fn generate_salt() -> String {
@@ -159,7 +165,7 @@ fn check_claim(_name: Value, released: Value, claimed_value: Value) -> Result<Va
         return Err(SDError::DigestError(hashed_value, claimed_hash.to_string()));
     }
     let released_values: Value = match released.as_str() {
-        Some(val) => serde_json::from_str(val).unwrap(),
+        Some(val) => serde_json::from_str(val)?,
         None => return Err(SDError::ReleasedClaimListError),
     };
 
