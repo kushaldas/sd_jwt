@@ -282,8 +282,12 @@ pub fn create_sd_jwt_release(
 
     let decoded_vec = base64_url::decode(&svc_payload_serialized)?;
     let decoded = str::from_utf8(&decoded_vec)?;
-    let svc_claims_outer: Value = serde_json::from_str(decoded).unwrap();
-    let svc_raw_values = svc_claims_outer.as_object().unwrap().get("_sd").unwrap();
+    let svc_claims_outer: Value = serde_json::from_str(decoded)?;
+    let svc_raw_values = svc_claims_outer
+        .as_object()
+        .ok_or(SDError::MissingValueError)?
+        .get("_sd")
+        .ok_or(SDError::MissingValueError)?;
 
     let get_raw_lambda = |_: Value, _: Value, raw: Value| Ok(raw);
 
@@ -293,10 +297,8 @@ pub fn create_sd_jwt_release(
     let _jwk_value: serde_json::Map<String, Value> = public_key.into();
     let mut payload = JwtPayload::new();
     // Set nonce & aud
-    payload
-        .set_claim("nonce", Some(Value::String(nonce)))
-        .unwrap();
-    payload.set_claim("aud", Some(Value::String(aud))).unwrap();
+    payload.set_claim("nonce", Some(Value::String(nonce)))?;
+    payload.set_claim("aud", Some(Value::String(aud)))?;
 
     // We don't need the public key in SD-JWT-RELEASE for now
     // payload
@@ -306,11 +308,9 @@ pub fn create_sd_jwt_release(
     let svc_disclosed_claims =
         walk_by_structure(svc_raw_values.clone(), disclosed_claims, &get_raw_lambda)?;
     // Now add the svc_disclised_claims
-    payload
-        .set_claim("_sd", Some(svc_disclosed_claims))
-        .unwrap();
+    payload.set_claim("_sd", Some(svc_disclosed_claims))?;
 
-    let sd_jwt_release = jwt::encode_with_signer(&payload, &header, &signer).unwrap();
+    let sd_jwt_release = jwt::encode_with_signer(&payload, &header, &signer)?;
     return Ok((Value::Object(payload.claims_set().clone()), sd_jwt_release));
 }
 
@@ -336,7 +336,7 @@ pub fn verify(
 
     // Let us first get the issuer's public key
 
-    let issuer_keypair = RsaKeyPair::from_pem(issuer_public_key).unwrap();
+    let issuer_keypair = RsaKeyPair::from_pem(issuer_public_key)?;
     let issuer_public_key = issuer_keypair.to_jwk_public_key();
 
     // This is the sd-jwt
@@ -404,7 +404,7 @@ fn verify_sd_jwt_release(
                 };
             }
             // Now let us create a verifier
-            let verifier = RS256.verifier_from_jwk(&holder_key).unwrap();
+            let verifier = RS256.verifier_from_jwk(&holder_key)?;
 
             // Now verify the signature
             jwt::decode_with_verifier(jwt, &verifier)?
@@ -416,7 +416,7 @@ fn verify_sd_jwt_release(
     if let Some(aud) = aud {
         match payload.claim("aud") {
             Some(aud_claim) => {
-                if aud_claim.as_str().unwrap() != aud {
+                if aud_claim.as_str().ok_or(SDError::MissingValueError)? != aud {
                     return Err(SDError::AudError);
                 }
             }
@@ -427,7 +427,7 @@ fn verify_sd_jwt_release(
     if let Some(nonce) = nonce {
         match payload.claim("nonce") {
             Some(nonce_claim) => {
-                let ncs = nonce_claim.as_str().unwrap();
+                let ncs = nonce_claim.as_str().ok_or(SDError::MissingValueError)?;
                 if ncs != nonce {
                     return Err(SDError::NonceError);
                 }
@@ -444,12 +444,12 @@ fn verify_sd_jwt_release(
 }
 
 fn verify_sd_jwt(jwt: &str, ipk: Jwk, issuer_details: &str) -> Result<(JwtPayload, JwsHeader)> {
-    let verifier = RS256.verifier_from_jwk(&ipk).unwrap();
+    let verifier = RS256.verifier_from_jwk(&ipk)?;
     let (payload, header) = jwt::decode_with_verifier(jwt, &verifier)?;
 
     match payload.claim("iss") {
         Some(issuer) => {
-            if issuer.as_str().unwrap() != issuer_details {
+            if issuer.as_str().ok_or(SDError::MissingValueError)? != issuer_details {
                 return Err(SDError::IssuerError);
             }
         }
