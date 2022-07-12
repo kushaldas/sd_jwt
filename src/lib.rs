@@ -1,6 +1,6 @@
 //! # sd_jwt
 //!
-//! `sd_jwt` is an implementation of the [SD-JWT](https://www.ietf.org/archive/id/draft-fett-selective-disclosure-jwt-00.html) draft.
+//! `sd_jwt` is an implementation of the [SD-JWT](https://www.ietf.org/archive/id/draft-fett-oauth-selective-disclosure-jwt-02.html) draft.
 //! Not ready for production yet.
 
 use base64;
@@ -243,7 +243,7 @@ pub fn create_sd_jwt(
     let sd_claims = walk_by_structure(salts.clone(), user_claims.clone(), &sd_claims_lambda)?;
     let mut svc_payload_map = serde_json::Map::new();
     svc_payload_map.insert(
-        "_sd".into(),
+        "sd_release".into(),
         walk_by_structure(salts, user_claims, &sd_svc_lambda)?,
     );
     let svc_payload = Value::Object(svc_payload_map);
@@ -273,8 +273,10 @@ pub fn create_sd_jwt(
         let jwk_value: serde_json::Map<String, Value> = holder_public_key.into();
         payload.set_claim("sub_jwk", Some(Value::Object(jwk_value)))?;
     }
+    // Add the hash_alg claim
+    payload.set_claim("hash_alg", Some(Value::String("sha-256".to_string())))?;
     // Now add the salted values
-    payload.set_claim("_sd", Some(sd_claims))?;
+    payload.set_claim("sd_digests", Some(sd_claims))?;
 
     let jwt = jwt::encode_with_signer(&payload, &header, &signer)?;
 
@@ -312,7 +314,7 @@ pub fn create_sd_jwt_release(
     let svc_raw_values = svc_claims_outer
         .as_object()
         .ok_or(SDError::MissingValueError)?
-        .get("_sd")
+        .get("sd_release")
         .ok_or(SDError::MissingValueError)?;
 
     let get_raw_lambda = |_: Value, _: Value, raw: Value| Ok(raw);
@@ -334,7 +336,7 @@ pub fn create_sd_jwt_release(
     let svc_disclosed_claims =
         walk_by_structure(svc_raw_values.clone(), disclosed_claims, &get_raw_lambda)?;
     // Now add the svc_disclised_claims
-    payload.set_claim("_sd", Some(svc_disclosed_claims))?;
+    payload.set_claim("sd_release", Some(svc_disclosed_claims))?;
 
     let sd_jwt_release = jwt::encode_with_signer(&payload, &header, &signer)?;
     return Ok((Value::Object(payload.claims_set().clone()), sd_jwt_release));
@@ -383,7 +385,7 @@ pub fn verify(
 
     // TODO: JWT header should not be None.
 
-    let sd_jwt_claims = match payload.claim("_sd") {
+    let sd_jwt_claims = match payload.claim("sd_digests") {
         Some(claims) => claims.clone(),
         None => {
             return Err(SDError::SDClaimMissing);
@@ -472,8 +474,8 @@ fn verify_sd_jwt_release(
         }
     }
 
-    // Now verify that _sd is there in the sd-jwt-release
-    match payload.claim("_sd") {
+    // Now verify that sd_release is there in the sd-jwt-release
+    match payload.claim("sd_release") {
         Some(value) => Ok(value.clone()),
         None => Err(SDError::SDJwtReleaseError),
     }

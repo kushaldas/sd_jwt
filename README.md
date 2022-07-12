@@ -1,6 +1,6 @@
 # SD_JWT
 
-This is an implementation of the [SD-JWT](https://www.ietf.org/archive/id/draft-fett-selective-disclosure-jwt-00.html) draft.
+This is an implementation of the [SD-JWT](https://www.ietf.org/archive/id/draft-fett-oauth-selective-disclosure-jwt-02.html) draft, revision 2.
 
 Do not use it in production yet.
 
